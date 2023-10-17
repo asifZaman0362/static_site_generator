@@ -703,6 +703,7 @@ dependencies = [
  "chrono",
  "comrak",
  "regex",
+ "walkdir",
 ]
 
 [[package]]
