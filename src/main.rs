@@ -1,7 +1,7 @@
 #[allow(deprecated)]
 use chrono::{Date, Utc};
 use comrak::nodes::{Ast, AstNode};
-use comrak::{self, format_html, parse_document, Arena, Options};
+use comrak::{self, format_html_with_plugins, parse_document, Arena, Options};
 use regex::{Captures, Regex, RegexBuilder};
 use std::cell::RefCell;
 use std::env::args;
@@ -170,12 +170,16 @@ fn main() -> std::io::Result<()> {
             }
         });
 
-        format_html(root, &options, &mut html).unwrap();
+        let syntect = comrak::plugins::syntect::SyntectAdapter::new("base16-eighties.dark");
+        let mut plugins = comrak::Plugins::default();
+        plugins.render.codefence_syntax_highlighter = Some(&syntect);
+
+        format_html_with_plugins(root, &options, &mut html, &plugins).unwrap();
         let html_string = String::from_utf8(html).unwrap();
-        let replaced = regex.replace_all(html_string.as_str(), |caps: &Captures| {
+        /*let replaced = regex.replace_all(html_string.as_str(), |caps: &Captures| {
             let tag_name = &caps[1];
             format!("<tag>{tag_name}</tag>")
-        });
+        });*/
 
         // put article inside skeleton
         let outdir = args.get(2).unwrap();
@@ -201,7 +205,7 @@ fn main() -> std::io::Result<()> {
         skeleton.read_to_end(&mut buf)?;
         let string = String::from_utf8(buf).unwrap();
         let (before, after) = string.split_once("<article></article>").unwrap();
-        let article = replaced.to_string();
+        let article = html_string.to_string();
         let joined = format!("{before}<article id=\"post\">{article}</article>{after}");
 
         // write file out
