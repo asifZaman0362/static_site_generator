@@ -1,8 +1,9 @@
 #[allow(deprecated)]
-use chrono::{Date, Utc};
+use chrono::prelude::*;
 use comrak::nodes::{Ast, AstNode};
 use comrak::{self, format_html_with_plugins, parse_document, Arena, Options};
 use regex::{Captures, Regex, RegexBuilder};
+use scraper::{Html, Selector};
 use std::cell::RefCell;
 use std::env::args;
 use std::fs::File;
@@ -22,12 +23,44 @@ where
     }
 }
 
+fn get_title(path: &str) -> String {
+    let mut file = File::open(path).unwrap();
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).unwrap();
+    let regex = Regex::new(r".*<title>(?<title>.*)</title>.*").unwrap();
+    let captures = regex.captures(&buf).unwrap();
+    return String::from(&captures["title"]);
+}
+
+fn num_to_monthname(s: &str) -> String {
+    match i32::from_str_radix(s, 10) {
+        Ok(s) => {
+            match s {
+                1 => "January".to_string(),
+                2 => "February".to_string(),
+                3 => "March".to_string(),
+                4 => "April".to_string(),
+                5 => "May".to_string(),
+                6 => "June".to_string(),
+                7 => "July".to_string(),
+                8 => "August".to_string(),
+                9 => "September".to_string(),
+                10 => "October".to_string(),
+                11 => "November".to_string(),
+                12 => "December".to_string(),
+                _ => s.to_string()
+            }
+        }
+        Err(_) => s.to_string()
+    }
+}
+
 fn build_tree(path: &Path, level: usize) -> std::io::Result<String> {
     let mut heading = format!(
         "<li><details {}><summary><h{}>{}</h{}></summary>",
         if level <= 1 { "open" } else { "open" },
         level + 1,
-        path.file_name().unwrap().to_str().unwrap(),
+        num_to_monthname(path.file_name().unwrap().to_str().unwrap()),
         level + 1,
     );
     let mut closing = "</details></li>".to_string();
@@ -38,22 +71,29 @@ fn build_tree(path: &Path, level: usize) -> std::io::Result<String> {
     if path.is_dir() {
         let mut ul = String::from("<ul>");
         let mut i = 0;
-        let mut entries = std::fs::read_dir(path)?
+        let entries = std::fs::read_dir(path)?
             .map(|res| res.map(|e| e.path()))
             .collect::<Result<Vec<_>, std::io::Error>>()?;
-        entries.sort();
+        let regex = Regex::new(".*.DS_Store.*").unwrap();
+        let mut entries = entries.iter().filter(|x| !regex.is_match(x.to_str().unwrap())).collect::<Vec<_>>();
+        entries.sort_by(|x, y| {
+            let (x, _) = x.file_stem().unwrap().to_str().unwrap().split_once("_").unwrap_or((x.to_str().unwrap(), ""));
+            let (y, _) = y.file_stem().unwrap().to_str().unwrap().split_once("_").unwrap_or((y.to_str().unwrap(), ""));
+            let num = i32::from_str_radix(x, 10).unwrap();
+            let other = i32::from_str_radix(y, 10).unwrap();
+            num.cmp(&other)
+        });
         for entry in entries.iter().rev() {
             i += 1;
             let path = entry;
             if path.is_dir() {
                 ul += build_tree(&path, level + 1)?.as_str();
             } else {
-                let filename = path.file_stem().unwrap().to_str().unwrap();
-                let (_, path) = path.to_str().unwrap().split_once("static").unwrap();
+                let (_, p) = path.to_str().unwrap().split_once("static").unwrap();
                 ul += format!(
                     "<li><h4><a href=\"{}\">{}</a></h4></li>",
-                    path,
-                    filename
+                    p,
+                    get_title(path.to_str().unwrap())
                 )
                 .as_str();
             }
@@ -65,12 +105,11 @@ fn build_tree(path: &Path, level: usize) -> std::io::Result<String> {
         }
         Ok(heading)
     } else {
-        let filename = path.file_stem().unwrap().to_str().unwrap();
-        let (_, path) = path.to_str().unwrap().split_once("static").unwrap();
+        let (_, p) = path.to_str().unwrap().split_once("static").unwrap();
         Ok(format!(
             "<li><h4><a href=\"/blog/{}\">{}</a></h4></li>",
-            path,
-            filename
+            p,
+            get_title(path.to_str().unwrap())
         ))
     }
 }
@@ -116,6 +155,7 @@ fn get_recent(dir: &str) -> std::io::Result<String> {
 
 #[allow(deprecated)]
 fn main() -> std::io::Result<()> {
+    
     let args: Vec<_> = args().collect();
     if args.len() != 3 {
         Err(std::io::Error::new(
@@ -123,6 +163,12 @@ fn main() -> std::io::Result<()> {
             "not enough arguments or too many!",
         ))
     } else {
+        let filename = args.get(2).unwrap();
+        let name = format!("{filename}/posts");
+        let path = Path::new(name.as_str());
+        let tree = build_tree(&path, 0).unwrap();
+        println!("{tree}");
+        /*
         let time: Date<Utc> = Utc::today();
         let iso_date = time.format("%Y-%m-%d").to_string();
         let date_display_format = time.format("%b %d, %Y").to_string();
@@ -147,7 +193,7 @@ fn main() -> std::io::Result<()> {
 
         let arena = Arena::new();
         let root = parse_document(&arena, &String::from_utf8(buf).unwrap(), &options);
-        let regex = Regex::new(r"#(\w+)").unwrap();
+        let regex = Regex::new(r"#t_(\w+)").unwrap();
         let mut html = vec![];
         let time_html = format!("<time datetime={}>{}</time>", iso_date, date_display_format);
         let parent = AstNode::new(RefCell::new(Ast::new(
@@ -176,10 +222,10 @@ fn main() -> std::io::Result<()> {
 
         format_html_with_plugins(root, &options, &mut html, &plugins).unwrap();
         let html_string = String::from_utf8(html).unwrap();
-        /*let replaced = regex.replace_all(html_string.as_str(), |caps: &Captures| {
+        let replaced = regex.replace_all(html_string.as_str(), |caps: &Captures| {
             let tag_name = &caps[1];
             format!("<tag>{tag_name}</tag>")
-        });*/
+        });
 
         // put article inside skeleton
         let outdir = args.get(2).unwrap();
@@ -196,25 +242,34 @@ fn main() -> std::io::Result<()> {
         let (timeline_start, timeline_end) = featured_end
             .split_once("<aside id=\"timeline\"></aside>")
             .unwrap();
-        let timeline = format!("{timeline_start}<aside id=\"timeline\">{tree}</aside>{timeline_end}");
-        let featured = format!("{featured_start}<section id=\"featured\">{featured_list}</section>");
+        let timeline =
+            format!("{timeline_start}<aside id=\"timeline\">{tree}</aside>{timeline_end}");
+        let featured =
+            format!("{featured_start}<section id=\"featured\">{featured_list}</section>");
         let mut root = File::create(format!("{outdir}/index.html"))?;
         root.write(format!("{featured}{timeline}").as_bytes())?;
         let mut skeleton = File::open(format!("{outdir}/skeleton.html"))?;
         let mut buf = vec![];
         skeleton.read_to_end(&mut buf)?;
         let string = String::from_utf8(buf).unwrap();
-        let (before, after) = string.split_once("<article></article>").unwrap();
-        let article = html_string.to_string();
-        let joined = format!("{before}<article id=\"post\">{article}</article>{after}");
+        let (title_before, title_after) = string.split_once("<title></title>").unwrap();
+        let (before, after) = title_after.split_once("<article></article>").unwrap();
+        let article = replaced.to_string();
+        let regex = Regex::new(r".*<title>(?<title>.*)</title>.*").unwrap();
+        let captures = regex.captures(article.as_str()).unwrap();
+        let title = &captures["title"];
+        let joined =
+            format!("{title_before}{title}{before}<article id=\"post\">{article}</article>{after}");
 
         // write file out
-        let date_for_filename = time.format("%Y-%b").to_string();
-        let (year, month) = date_for_filename.split_once("-").unwrap();
         let postname = path.file_stem().unwrap().to_str().unwrap();
+        let time = Utc::now();
+        let year = time.year();
+        let month = time.month();
+        let day = time.day();
         let outdir_tagged = format!("{outdir}/posts/{year}/{month}");
         std::fs::create_dir_all(&outdir_tagged)?;
-        let outfilepath = format!("{outdir_tagged}/{postname}.html");
+        let outfilepath = format!("{outdir_tagged}/{day}_{postname}.html");
         let mut outfile = File::create(&outfilepath)?;
         outfile.write_all(joined.as_bytes())?;
 
@@ -223,7 +278,7 @@ fn main() -> std::io::Result<()> {
         let prettier = "prettier";
         let args = [outfilepath, "-w".to_string()];
 
-        Command::new(prettier).args(args).output().unwrap();
+        Command::new(prettier).args(args).output().unwrap();*/
 
         Ok(())
     }
