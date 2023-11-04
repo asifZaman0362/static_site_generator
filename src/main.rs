@@ -73,7 +73,7 @@ fn create_post_page(markdown_filepath: &String, outdir: &String) -> std::io::Res
 
     let (title_before, title_after) = buf.split_once("<title></title>").unwrap();
     let (article_before, article_after) = title_after.split_once("<article></article>").unwrap();
-    let regex = Regex::new(r".*<title>(?<title>.*)</title>.*").unwrap();
+    let regex = Regex::new(r".*?<h1><a.*?</a>(?<title>.*)?</h1>.*").unwrap();
     let captures = regex.captures(parsed_article.as_str()).unwrap();
     let title = &captures["title"];
     let joined =

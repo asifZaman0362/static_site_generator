@@ -34,7 +34,7 @@ pub fn create_timeline(path: &str) -> std::io::Result<String> {
                 list_html += format!(
                     "\t\t<li><details>\n\t\t\t<summary><span><h3>{}</h3></span></summary>\n\t\t\t<ul>\n",
                     NAMES[usize::from_str_radix(month.file_stem().unwrap().to_str().unwrap(), 10)
-                        .unwrap()]
+                        .unwrap() - 1usize]
                 )
                 .as_str();
                 let entries = list_directories(month.to_str().unwrap())?;
